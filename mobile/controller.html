@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Slow Fist controller</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0d12; color: #e8ecf4; font-family: system-ui, sans-serif; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+  #bar { position: fixed; top: 6px; left: 8px; right: 8px; display: flex; gap: 8px; align-items: center; font-size: 12px; color: #8a90a0; z-index: 2; }
+  #bar button { background: #1b2030; color: #e8ecf4; border: 1px solid #343b50; border-radius: 4px; padding: 5px 10px; font-size: 12px; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; }
+</style>
+</head>
+<body>
+<div id="bar"><button id="face">Facing: right</button><span>Controller prototype: left circle moves, right circles attack. Use touch (several fingers) or the mouse.</span></div>
+<canvas id="c"></canvas>
+<script>
+(function () {
+  'use strict';
+  /* logical size 800 x 360, scaled to the screen */
+  const LW = 800, LH = 360;
+  const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+  let S = 1, OX = 0, OY = 0, facing = 1;
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
+    S = Math.min(innerWidth / LW, innerHeight / LH); OX = (innerWidth - LW * S) / 2; OY = (innerHeight - LH * S) / 2;
+    cv.dpr = dpr;
+  }
+  addEventListener('resize', resize); resize();
+
+  const PAD = { x: 140, y: 215, r: 96 };
+  const HAND = { x: 668, y: 100, r: 74, limb: 'hand', col: '#5ab0ff' };
+  const LEG = { x: 668, y: 262, r: 74, limb: 'leg', col: '#ffb15a' };
+  const DEAD = 0.2;
+
+  const pads = {};            /* pointerId -> state */
+  let padOut = { dx: 0, dy: 0, speed: 0, seg: null };
+  const trails = [];          /* finished strokes, fading */
+  const history = [];
+  let flash = { hand: null, leg: null };
+
+  const SEGNAME = ['right', 'down', 'left', 'up'];       /* canvas angle order: 0 right, 90 down, 180 left, 270 up */
+  function seg(dx, dy) { const a = (Math.atan2(dy, dx) * 180 / Math.PI + 360 + 45) % 360; return SEGNAME[Math.floor(a / 90) % 4]; }
+  function toLocal(e) { return { x: (e.clientX - OX) / S, y: (e.clientY - OY) / S }; }
+  const dist = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
+
+  /* ---------------- the stroke decoder: the heart of the control scheme ---------------- */
+  function decode(stroke, C) {
+    const pts = stroke.pts, R = C.r, f = facing;
+    let P = 0, peak = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const d = dist(pts[i], pts[i - 1]), dt = Math.max(1, pts[i].t - pts[i - 1].t);
+      P += d; if (d > 0) peak = Math.max(peak, d / dt * 1000);
+    }
+    const a = pts[0], b = pts[pts.length - 1], dx = (b.x - a.x) * f, dy = b.y - a.y;
+    const power = Math.min(1, P / (1.1 * R)), speed = Math.min(1, peak / (R * 5));
+    /* total turning of the path, sampled every few pixels */
+    let turn = 0, last = null, prevH = null;
+    for (const p of pts) {
+      if (!last) { last = p; continue; }
+      if (dist(p, last) < 7) continue;
+      const h = Math.atan2(p.y - last.y, (p.x - last.x) * f);
+      if (prevH !== null) { let t = h - prevH; while (t > Math.PI) t -= 2 * Math.PI; while (t < -Math.PI) t += 2 * Math.PI; turn += t; }
+      prevH = h; last = p;
+    }
+    const segs = []; for (const p of pts) { if (dist(p, C) > DEAD * R) { const s = seg((p.x - C.x) * f, p.y - C.y); if (segs[segs.length - 1] !== s) segs.push(s); } }
+    const hand = C.limb === 'hand', tier = speed > 0.6 ? 'quick' : (power > 0.7 ? 'heavy' : 'normal');
+    const out = { limb: C.limb, power: power, speed: speed, tier: tier, segs: segs, path: Math.round(P), turn: Math.round(turn * 180 / Math.PI) };
+    if (P < 0.3 * R) { out.type = 'TAP'; out.move = hand ? 'JAB' : 'FRONT KICK'; out.why = 'a tap: the quick poke'; return out; }
+    if (dx < -0.45 * R && Math.abs(dx) > Math.abs(dy)) { out.type = 'GRAPPLE'; out.move = hand ? 'GRAB' : 'LEG HOOK (trip)'; out.why = 'drawn back toward the body'; return out; }
+    if (Math.abs(turn) > 1.2 && P > 0.5 * R) {
+      const cw = turn > 0 ? 'clockwise' : 'anticlockwise';
+      out.type = 'ARC';
+      if (hand) out.move = (b.y < C.y ? 'HEAD' : 'BODY') + ' HOOK';
+      else out.move = dy > 0.4 * R ? 'LOW SWEEP' : 'ROUNDHOUSE';
+      out.why = 'a curved path (' + cw + ', ' + Math.round(Math.abs(turn) * 180 / Math.PI) + ' deg)'; return out;
+    }
+    const ang = Math.atan2(dy, dx) * 180 / Math.PI;          /* 0 = forward, -90 = up, 90 = down */
+    if (Math.abs(ang) <= 45) { out.type = 'STRAIGHT'; out.move = hand ? (tier === 'quick' ? 'JAB' : tier === 'heavy' ? 'HEAVY CROSS' : 'CROSS') : (tier === 'heavy' ? 'HEAVY KICK' : 'FRONT KICK'); out.why = 'straight through the forward segment'; }
+    else if (ang < -45) { out.type = 'RISING'; out.move = hand ? 'UPPERCUT' : 'RISING KICK'; out.why = 'upward through the top segment'; }
+    else { out.type = 'LOW'; out.move = hand ? 'BODY SHOT' : 'LOW KICK'; out.why = 'downward through the bottom segment'; }
+    return out;
+  }
+
+  /* ---------------- touch handling ---------------- */
+  cv.addEventListener('pointerdown', function (e) {
+    e.preventDefault(); cv.setPointerCapture(e.pointerId);
+    const p = toLocal(e);
+    if (dist(p, PAD) < PAD.r * 1.45) pads[e.pointerId] = { kind: 'pad' };
+    else for (const C of [HAND, LEG]) if (dist(p, C) < C.r * 1.25) pads[e.pointerId] = { kind: 'atk', C: C, pts: [{ x: p.x, y: p.y, t: e.timeStamp }] };
+    if (pads[e.pointerId] && pads[e.pointerId].kind === 'pad') move(e);
+  });
+  function move(e) {
+    const s = pads[e.pointerId]; if (!s) return; const p = toLocal(e);
+    if (s.kind === 'pad') {
+      const vx = p.x - PAD.x, vy = p.y - PAD.y, d = Math.min(dist(p, PAD), PAD.r), k = d / PAD.r;
+      const ang = Math.atan2(vy, vx);
+      padOut = k < DEAD ? { dx: 0, dy: 0, speed: 0, seg: null, kx: PAD.x, ky: PAD.y }
+        : { dx: Math.cos(ang) * k, dy: Math.sin(ang) * k, speed: (k - DEAD) / (1 - DEAD), seg: seg(vx, vy), kx: PAD.x + Math.cos(ang) * d, ky: PAD.y + Math.sin(ang) * d };
+      if (k < DEAD) padOut.kx = PAD.x + vx * 0.3, padOut.ky = PAD.y + vy * 0.3;
+    } else s.pts.push({ x: p.x, y: p.y, t: e.timeStamp });
+  }
+  cv.addEventListener('pointermove', function (e) { if (pads[e.pointerId]) { e.preventDefault(); move(e); } });
+  function up(e) {
+    const s = pads[e.pointerId]; if (!s) return; delete pads[e.pointerId];
+    if (s.kind === 'pad') { padOut = { dx: 0, dy: 0, speed: 0, seg: null }; return; }
+    if (s.pts.length < 1) return;
+    const out = decode(s, s.C); out.t = performance.now();
+    flash[s.C.limb] = out; trails.push({ pts: s.pts, col: s.C.col, t: out.t });
+    history.unshift(out); if (history.length > 5) history.pop();
+  }
+  cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+  document.getElementById('face').addEventListener('click', function () { facing = -facing; this.textContent = 'Facing: ' + (facing > 0 ? 'right' : 'left'); });
+
+  /* ---------------- drawing ---------------- */
+  function wedge(C, a0, a1, fill) { ctx.beginPath(); ctx.moveTo(C.x, C.y); ctx.arc(C.x, C.y, C.r, a0 * Math.PI / 180, a1 * Math.PI / 180); ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); }
+  const WEDGE = { right: [-45, 45], down: [45, 135], left: [135, 225], up: [225, 315] };
+  function circle(C, col, labels, active) {
+    for (const k in WEDGE) wedge(C, WEDGE[k][0], WEDGE[k][1], active && active[k] ? col + '66' : col + '14');
+    ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(C.x, C.y, C.r, 0, 7); ctx.stroke();
+    ctx.lineWidth = 1; ctx.strokeStyle = col + '88';
+    for (const a of [45, 135, 225, 315]) { ctx.beginPath(); ctx.moveTo(C.x + Math.cos(a * Math.PI / 180) * C.r * DEAD, C.y + Math.sin(a * Math.PI / 180) * C.r * DEAD); ctx.lineTo(C.x + Math.cos(a * Math.PI / 180) * C.r, C.y + Math.sin(a * Math.PI / 180) * C.r); ctx.stroke(); }
+    ctx.beginPath(); ctx.arc(C.x, C.y, C.r * DEAD, 0, 7); ctx.stroke();
+    ctx.fillStyle = '#c7cde0'; ctx.font = '11px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const o = C.r * 0.62;
+    ctx.fillText(labels.up, C.x, C.y - o); ctx.fillText(labels.down, C.x, C.y + o);
+    ctx.fillText(labels.right, C.x + o, C.y); ctx.fillText(labels.left, C.x - o, C.y);
+  }
+  function bar(x, y, w, v, col, label) {
+    ctx.fillStyle = '#1b1f29'; ctx.fillRect(x, y, w, 7); ctx.fillStyle = col; ctx.fillRect(x, y, w * v, 7);
+    ctx.fillStyle = '#8a90a0'; ctx.font = '10px system-ui'; ctx.textAlign = 'left'; ctx.fillText(label, x + w + 6, y + 4);
+  }
+  function draw(now) {
+    ctx.setTransform(cv.dpr, 0, 0, cv.dpr, 0, 0);
+    ctx.fillStyle = '#0f1218'; ctx.fillRect(0, 0, innerWidth, innerHeight);
+    ctx.save(); ctx.translate(OX, OY); ctx.scale(S, S);
+    ctx.strokeStyle = '#262b38'; ctx.strokeRect(0.5, 0.5, LW - 1, LH - 1);
+
+    /* movement circle: forward/back follow the screen, so right is always right */
+    const act = {}; if (padOut.seg) act[padOut.seg] = true;
+    circle(PAD, '#7fe0ff', { up: 'JUMP', down: 'CROUCH', left: 'LEFT', right: 'RIGHT' }, act);
+    ctx.fillStyle = 'rgba(127,224,255,0.25)'; ctx.beginPath(); ctx.arc(PAD.x, PAD.y, PAD.r * 0.2, 0, 7); ctx.fill();
+    const kx = padOut.kx !== undefined ? padOut.kx : PAD.x, ky = padOut.ky !== undefined ? padOut.ky : PAD.y;
+    ctx.fillStyle = '#7fe0ff'; ctx.beginPath(); ctx.arc(kx, ky, 15, 0, 7); ctx.fill();
+    ctx.fillStyle = '#7fe0ff'; ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('MOVE', PAD.x, PAD.y - PAD.r - 12);
+
+    /* attack circles, labels are relative to the way the fighter faces */
+    const fw = facing > 0 ? 'FRONT' : 'FRONT';
+    const hl = { up: 'UPPERCUT', down: 'BODY', right: 'STRAIGHT', left: 'GRAB' }, ll = { up: 'RISING', down: 'LOW', right: 'FRONT', left: 'TRIP' };
+    if (facing < 0) { [hl.left, hl.right] = [hl.right, hl.left]; [ll.left, ll.right] = [ll.right, ll.left]; }
+    const live = { hand: {}, leg: {} };
+    for (const id in pads) { const s = pads[id]; if (s.kind === 'atk') { const l = live[s.C.limb]; for (const p of s.pts) if (dist(p, s.C) > DEAD * s.C.r) l[seg(p.x - s.C.x, p.y - s.C.y)] = true; } }
+    circle(HAND, HAND.col, hl, live.hand); circle(LEG, LEG.col, ll, live.leg);
+    ctx.font = 'bold 12px system-ui'; ctx.fillStyle = HAND.col; ctx.fillText('HANDS', HAND.x, HAND.y - HAND.r - 9); ctx.fillStyle = LEG.col; ctx.fillText('LEGS', LEG.x, LEG.y + LEG.r + 12);
+    /* arc hint on the diagonals */
+    ctx.fillStyle = '#6d7383'; ctx.font = '9px system-ui';
+    for (const C of [HAND, LEG]) ctx.fillText('arc = ' + (C === HAND ? 'hook' : 'roundhouse'), C.x, C.y + C.r * 0.2 + 10);
+
+    /* trails */
+    for (let i = trails.length - 1; i >= 0; i--) { const t = trails[i], age = (now - t.t) / 900; if (age >= 1) { trails.splice(i, 1); continue; } strokePath(t.pts, t.col, 1 - age); }
+    for (const id in pads) { const s = pads[id]; if (s.kind === 'atk') strokePath(s.pts, s.C.col, 1); }
+
+    /* centre panel: what the game would receive */
+    ctx.textAlign = 'left'; ctx.fillStyle = '#e8ecf4'; ctx.font = 'bold 13px system-ui';
+    ctx.fillText('Output to the game', 290, 56);
+    ctx.font = '12px system-ui'; ctx.fillStyle = '#c7cde0';
+    ctx.fillText(padOut.seg ? 'move ' + (padOut.seg === 'up' ? 'jump' : padOut.seg === 'down' ? 'crouch' : padOut.seg) + '  speed ' + padOut.speed.toFixed(2) : 'move: idle', 290, 76);
+    bar(290, 84, 120, padOut.speed, '#7fe0ff', 'speed');
+    let y = 118;
+    for (const limb of ['hand', 'leg']) {
+      const o = flash[limb], col = limb === 'hand' ? HAND.col : LEG.col;
+      ctx.fillStyle = col; ctx.font = 'bold 12px system-ui'; ctx.fillText(limb.toUpperCase(), 290, y);
+      if (!o) { ctx.fillStyle = '#6d7383'; ctx.font = '12px system-ui'; ctx.fillText('swipe in the circle', 335, y); y += 62; continue; }
+      const fade = Math.max(0.35, 1 - (now - o.t) / 6000);
+      ctx.globalAlpha = fade; ctx.fillStyle = '#fff'; ctx.font = 'bold 18px system-ui'; ctx.fillText(o.move, 335, y + 1);
+      ctx.fillStyle = '#9aa1b3'; ctx.font = '11px system-ui'; ctx.fillText(o.type + ' (' + o.tier + '): ' + o.why, 290, y + 18);
+      bar(290, y + 27, 120, o.power, '#ff8a5a', 'power (length ' + o.path + ' px)'); bar(290, y + 39, 120, o.speed, '#ffd24d', 'speed');
+      ctx.globalAlpha = 1; y += 62;
+    }
+    ctx.fillStyle = '#6d7383'; ctx.font = '10px system-ui'; ctx.fillText('Recent: ' + history.map(h => h.move).join('  >  '), 290, 338);
+    ctx.restore();
+    requestAnimationFrame(draw);
+  }
+  function strokePath(pts, col, alpha) {
+    if (pts.length < 2) return;
+    ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = col; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
+    ctx.fillStyle = '#fff'; const e = pts[pts.length - 1]; ctx.beginPath(); ctx.arc(e.x, e.y, 4, 0, 7); ctx.fill(); ctx.restore();
+  }
+  window.CTRL = { decode: decode, HAND: HAND, LEG: LEG, setFacing: function (f) { facing = f; } };
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

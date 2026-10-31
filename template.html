@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slow Fist v2</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0b0d12">
+<link rel="icon" href="icons/icon-192.png">
+<style>
+  html, body { margin: 0; background: #0b0d12; color: #e8ecf4; font-family: system-ui, sans-serif; }
+  #wrap { max-width: 900px; margin: 0 auto; padding: 8px; }
+  canvas { width: 100%; height: auto; display: block; background: #0f1218; border: 1px solid #262b38; border-radius: 6px; }
+  #tools { margin: 8px 0 0; display: flex; flex-wrap: wrap; gap: 8px; }
+  #tools button { background: #1b2030; color: #e8ecf4; border: 1px solid #343b50; border-radius: 4px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
+  #tools button:hover { background: #252c40; }
+  #guide { margin-top: 14px; font-size: 14px; line-height: 1.5; color: #c4cada; }
+  #guide h2 { font-size: 17px; margin: 20px 0 6px; color: #ffd24d; }
+  #guide h3 { font-size: 14px; margin: 14px 0 4px; color: #7fb0ff; }
+  #guide table { border-collapse: collapse; width: 100%; margin: 6px 0; }
+  #guide td, #guide th { border: 1px solid #262b38; padding: 4px 8px; text-align: left; vertical-align: top; }
+  #guide th { background: #151922; color: #e8ecf4; }
+  kbd { background: #1b2030; border: 1px solid #343b50; border-radius: 3px; padding: 0 5px; font-size: 12px; }
+  .note { color: #8a90a0; font-size: 12px; }
+  body.touch { overflow: hidden; }
+  body.touch #tools, body.touch .note, body.touch #guide { display: none; }
+  body.touch #wrap { max-width: none; padding: 0; }
+  body.touch canvas#c { width: min(100vw, 200vh); margin: 0 auto; border: 0; border-radius: 0; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c" width="900" height="450"></canvas>
+  <div id="tools">
+    <button id="bRec" title="V">Record</button>
+    <button id="bPlay" title="B">Replay</button>
+    <button id="bSave">Save recording</button>
+    <button id="bLoad">Load recording</button>
+    <button id="bVid">Export video</button>
+    <button id="b3d" title="3">3D view</button>
+    <button id="bMenu" title="P">Menu</button>
+    <input id="fLoad" type="file" accept=".json,application/json" hidden>
+  </div>
+  <p class="note">Slow Fist v2. F1 shows the controls over the game, F2 toggles sound. Source modules are in <code>src/</code>; tests run with <code>node tests/run.js</code>.</p>
+
+  <section id="guide">
+    <h2>How to play</h2>
+    <p>Two stick fighters duel in slow motion. It is not turn based: you read what the opponent is doing, plan a counter, and the physics (reach, angle, speed, balance, stamina) decides the result. Reduce the other fighter's health to zero for a K.O.</p>
+
+    <h2>Controls</h2>
+    <table>
+      <tr><th>Action</th><th>Player 1 (blue)</th><th>Player 2 (orange)</th></tr>
+      <tr><td>Move left / right</td><td><kbd>A</kbd> <kbd>D</kbd></td><td><kbd>Left</kbd> <kbd>Right</kbd></td></tr>
+      <tr><td>Jump</td><td><kbd>W</kbd></td><td><kbd>Up</kbd></td></tr>
+      <tr><td>Crouch</td><td><kbd>S</kbd></td><td><kbd>Down</kbd></td></tr>
+      <tr><td>Aim up / down</td><td><kbd>Q</kbd> <kbd>E</kbd></td><td>Numpad <kbd>8</kbd> <kbd>2</kbd> (or <kbd>I</kbd> <kbd>O</kbd>)</td></tr>
+      <tr><td>Punch</td><td><kbd>F</kbd></td><td>Numpad <kbd>4</kbd> (or <kbd>K</kbd>)</td></tr>
+      <tr><td>Kick</td><td><kbd>G</kbd></td><td>Numpad <kbd>6</kbd> (or <kbd>L</kbd>)</td></tr>
+      <tr><td>Block</td><td><kbd>H</kbd></td><td>Numpad <kbd>5</kbd> (or <kbd>J</kbd>)</td></tr>
+      <tr><td>Grapple</td><td><kbd>Z</kbd></td><td>Numpad <kbd>1</kbd> (or <kbd>M</kbd>)</td></tr>
+      <tr><td>Dash</td><td><kbd>C</kbd></td><td>Numpad <kbd>3</kbd> (or <kbd>N</kbd>)</td></tr>
+    </table>
+    <table>
+      <tr><th>Key</th><th>Game control</th></tr>
+      <tr><td><kbd>T</kbd></td><td>Mode: two players, player vs AI, AI vs AI</td></tr>
+      <tr><td><kbd>1</kbd> <kbd>2</kbd></td><td>Change the fighting style of player 1 / 2 (Boxer, Kicker, Grappler)</td></tr>
+      <tr><td><kbd>R</kbd></td><td>Restart the round</td></tr>
+      <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Slower / faster (0.1 to 1.0; 1.0 is real time)</td></tr>
+      <tr><td><kbd>F1</kbd> / <kbd>F2</kbd></td><td>Show or hide the help overlay / turn sound on or off</td></tr>
+    </table>
+
+    <h2>Recording and replay</h2>
+    <p>Press <kbd>V</kbd> (or the Record button) to start a <b>new round</b> and record it; press <kbd>V</kbd> again to stop. Recording also stops by itself two seconds after a K.O. so the fall is included. Press <kbd>B</kbd> (or Replay) to watch the last recording at <b>normal speed</b>, whatever the live slow-motion setting is; <kbd>[</kbd> <kbd>]</kbd> change the replay speed from 0.1 to 2.0 and <kbd>B</kbd> leaves the replay. The reset, mode and style keys are ignored during a replay.</p>
+    <p><b>Save recording</b> downloads a small JSON file (seed, styles, and the inputs of each human player). <b>Load recording</b> reads one back and checks it: the game replays it in the background and rejects a file that does not reproduce exactly (for example one edited by hand, or made by a different version or browser). <b>Export video</b> replays the recording at normal speed and saves it as a .webm video where the browser supports it.</p>
+
+    <h2>Striking</h2>
+    <p>Hold punch or kick to wind up and release to throw. How long you held picks the move, and the aim angle picks where it lands (high is the head, level is the body, low is the legs). Tap the same key while the strike is in flight to speed it up, up to three times as fast; each tap costs stamina and there is a short gap between taps. Hold time and taps set the speed, and speed sets the power.</p>
+    <table>
+      <tr><th>Move</th><th>How</th></tr>
+      <tr><td>Jab / front kick</td><td>Tap</td></tr>
+      <tr><td>Cross</td><td>Short hold (punch)</td></tr>
+      <tr><td>Hook / roundhouse</td><td>Medium hold</td></tr>
+      <tr><td>Heavy punch / heavy kick</td><td>Long hold</td></tr>
+      <tr><td>Spinning kick</td><td>Long hold with a Kicker; the body turns a full circle</td></tr>
+      <tr><td>Uppercut</td><td>Aim high, or crouch and punch</td></tr>
+      <tr><td>Overhand</td><td>Aim steeply down</td></tr>
+      <tr><td>Rising kick / low kick</td><td>Aim high / aim low</td></tr>
+      <tr><td>Low sweep</td><td>Crouch and kick</td></tr>
+      <tr><td>Jump punch / flying side kick</td><td>Punch or kick in the air</td></tr>
+    </table>
+
+    <h2>Defence</h2>
+    <p><b>Block</b>: hold block and aim at the incoming strike. In the arc is a block (small damage), near the edge is partial, outside is a hit. <b>Parry</b>: raise the guard just before impact (within a quarter of a second) at the right angle: no damage, the attacker staggers and you get a counter window (your next strike is faster, harder and harder to guard). Guard health drains as you block; at zero the guard breaks.</p>
+    <p><b>Dash</b> through an incoming strike to dodge it: you cannot be hit for the first moments, you get a counter window and a little stamina back.</p>
+    <p><b>Grapple</b>: close in and grab. It beats a guard, but a crouching, dashing or quickly retreating opponent slips out, it needs a short wind-up, and it has a cooldown. A successful grab flips the opponent over your head for big damage.</p>
+
+    <h2>Movement</h2>
+    <p>Hold a direction to build speed. <b>Sprint</b>: tap the same direction twice quickly for a burst of extra speed (costs a little stamina). <b>Jump</b>: the fighter crouches for a moment, then springs; hold the key to jump higher. Crouch lowers you, shortens your strides and ducks high strikes.</p>
+
+    <h2>Meters</h2>
+    <table>
+      <tr><th>Meter</th><th>Meaning</th></tr>
+      <tr><td>Top bar (blue or orange)</td><td>Health</td></tr>
+      <tr><td>Yellow bar</td><td>Stamina. Strikes, taps, dashes, jumps, sprints and grabs cost it. At zero you are exhausted: slow, no strikes or jumps until it recovers to 30.</td></tr>
+      <tr><td>Light blue bar</td><td>Guard health</td></tr>
+      <tr><td>Balance gauge</td><td><b>Balance</b>: the marker shows where your weight sits. Toward the opponent means committed (more power); away means on the back foot. Advancing shifts it forward, retreating or winding up shifts it back. A big swing or a miss throws you off balance (red): slower, narrower guard, takes 25 percent more damage and falls easily.</td></tr>
+    </table>
+
+    <h2>Hits and knockdowns</h2>
+    <p>Head hits do more damage and leave you dizzy. Body hits drain stamina and double you over. Leg hits slow you, and if you were running you trip. Hits landed while the opponent is still reeling chain into a combo, adding damage for each hit. A hit that is big enough for the target's balance knocks them down; they get up in a sequence (hands and knees, one knee, rise) and cannot be hit during the first moments of it.</p>
+    <p class="note">Version 2 does not yet have: online play, touch controls, mouse aim, slide kick, superman punch, somersault kick, shoulder tackle and axe kick.</p>
+  </section>
+</div>
+<script>
+/*SRC*/
+</script>
+<script>if ('serviceWorker' in navigator) { window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () { /* not on https or localhost: the game still runs, just not offline */ }); }); }</script>
+</body>
+</html>
