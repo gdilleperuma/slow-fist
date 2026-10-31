@@ -379,6 +379,7 @@ A practice mode: a dummy opponent with a choice of behaviour, a list of drills t
 | BR-12 | The pause menu opens, pauses the match and resumes (browser). |
 | BR-13 | The first-run prompt appears once (browser). |
 | BR-14 | A tap on the jab zone punches; the settings change the layout (browser). |
+| BR-15 | While down, key W starts the kip-up and the match goes on (browser). |
 | PWA-03 | The service worker parses and behaves: install caches the assets, activate deletes old caches, the page comes from the network and falls back to the cache offline, other files come from the cache (tested in a fake worker environment; a real worker needs https or localhost). |
 \n| ACT-04 | Different moves look different: the contact poses of any two moves differ by at least 4 px (RMS over all joints, hip-relative; a spin squeeze counts), except pairs listed with a reason. The catalogue also shows what a still pose cannot: the path of the striking limb, a highlight on it, the aim angle, a timing bar and the numbers (DEF-032). |\n
 

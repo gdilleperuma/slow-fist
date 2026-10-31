@@ -9,7 +9,7 @@ const root = path.join(__dirname, '..'), read = p => fs.readFileSync(path.join(r
 const req = read('docs/REQUIREMENTS.md'), log = read('docs/QA-LOG.md'), guide = fs.readFileSync(path.join(root, '..', 'HOW-TO-BUILD-QUALITY-SOFTWARE.md'), 'utf8');
 
 /* requirements that are checked by eye or by the browser, not by a node test (each with the reason) */
-const BY_HAND = { 'TAP-01': 'tap-to-jab: browser smoke BR-14', 'HUD-01': 'labelled HUD and palette: browser smoke BR-10', 'MNU-01': 'quick play and pause: browser smoke BR-11, BR-12', 'TURN-03': 'touch controller labels follow the facing: browser only (BR-07 checks the button)', 'UI-01': 'help: browser smoke BR-02 and BR-06', 'REC-08': 'recording buttons: tests/browser-smoke-rec.js' };
+const BY_HAND = { 'TAP-01': 'tap-to-jab: browser smoke BR-14', 'HUD-01': 'labelled HUD and palette: browser smoke BR-10', 'MNU-01': 'quick play and pause: browser smoke BR-11, BR-12', 'TURN-03': 'touch controller labels follow the facing: browser only (BR-07 checks the button)', 'UI-01': 'help: browser smoke BR-02 and BR-06', 'REC-08': 'recording buttons: tests/browser-smoke-rec.js', 'RCV-12': 'recovery wheel and key W while down: browser smoke BR-15' };
 
 const reqIds = new Set(); for (const m of req.matchAll(/^\| ([A-Z][A-Za-z]*-\d+[a-z]?) \|/gm)) reqIds.add(m[1]);
 const testIds = new Set();
